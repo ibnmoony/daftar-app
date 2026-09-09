@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>دفتر — نظام البيع بالتقسيط</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- شاشة ربط النظام بالخادم (تظهر أول مرة فقط أو عند تغيير الرابط) -->
+<div id="connectScreen" class="auth-screen hidden">
+  <div class="auth-card">
+    <div class="brand">
+      <span class="brand-mark">📒</span>
+      <div>
+        <h1>دفتر</h1>
+        <p>نظام البيع بالتقسيط</p>
+      </div>
+    </div>
+    <p class="auth-hint">الصقّ رابط تطبيق الويب (Web App URL) الذي حصلت عليه من Google Apps Script بعد النشر.</p>
+    <label>رابط الخادم (Apps Script Web App URL)</label>
+    <input id="apiUrlInput" type="text" placeholder="https://script.google.com/macros/s/XXXXXXX/exec">
+    <button class="btn btn-primary btn-block" id="btnSaveApiUrl">حفظ ومتابعة</button>
+    <p class="auth-error" id="connectError"></p>
+  </div>
+</div>
+
+<!-- شاشة تهيئة أول مدير للنظام -->
+<div id="setupScreen" class="auth-screen hidden">
+  <div class="auth-card">
+    <div class="brand">
+      <span class="brand-mark">📒</span>
+      <div>
+        <h1>دفتر</h1>
+        <p>إعداد النظام لأول مرة</p>
+      </div>
+    </div>
+    <p class="auth-hint">لا يوجد أي مستخدم بعد. أنشئ حساب المدير الرئيسي للنظام.</p>
+    <label>الاسم</label>
+    <input id="setupName" type="text" placeholder="اسمك الكامل">
+    <label>البريد الإلكتروني</label>
+    <input id="setupEmail" type="email" placeholder="admin@example.com">
+    <label>كلمة المرور (٦ خانات على الأقل)</label>
+    <input id="setupPassword" type="password" placeholder="••••••••">
+    <button class="btn btn-primary btn-block" id="btnCreateAdmin">إنشاء حساب المدير والدخول</button>
+    <p class="auth-error" id="setupError"></p>
+    <button class="btn-link" id="btnChangeApiFromSetup">تغيير رابط الخادم</button>
+  </div>
+</div>
+
+<!-- شاشة تسجيل الدخول -->
+<div id="loginScreen" class="auth-screen hidden">
+  <div class="auth-card">
+    <div class="brand">
+      <span class="brand-mark">📒</span>
+      <div>
+        <h1>دفتر</h1>
+        <p>نظام البيع بالتقسيط</p>
+      </div>
+    </div>
+    <label>البريد الإلكتروني</label>
+    <input id="loginEmail" type="email" placeholder="name@example.com">
+    <label>كلمة المرور</label>
+    <input id="loginPassword" type="password" placeholder="••••••••">
+    <button class="btn btn-primary btn-block" id="btnLogin">دخول</button>
+    <p class="auth-error" id="loginError"></p>
+    <button class="btn-link" id="btnChangeApiFromLogin">تغيير رابط الخادم</button>
+  </div>
+</div>
+
+<!-- هيكل التطبيق الرئيسي -->
+<div id="appShell" class="app-shell hidden">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-mark">📒</span>
+      <div>
+        <strong>دفتر</strong>
+        <small>البيع بالتقسيط</small>
+      </div>
+    </div>
+    <nav id="sideNav" class="side-nav"></nav>
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <span id="userInitial" class="user-avatar"></span>
+        <div>
+          <strong id="userName">—</strong>
+          <small id="userRole">—</small>
+        </div>
+      </div>
+      <button class="btn-link danger" id="btnLogout">خروج</button>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <header class="topbar">
+      <h2 id="pageTitle">لوحة التحكم</h2>
+      <div id="topbarActions" class="topbar-actions"></div>
+    </header>
+    <main id="view" class="view"></main>
+  </div>
+</div>
+
+<!-- طبقة النافذة الجانبية (نموذج الإضافة/التعديل) -->
+<div id="drawerOverlay" class="drawer-overlay hidden">
+  <div class="drawer">
+    <div class="drawer-head">
+      <h3 id="drawerTitle">—</h3>
+      <button class="icon-btn" id="drawerClose">✕</button>
+    </div>
+    <div id="drawerBody" class="drawer-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
