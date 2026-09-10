@@ -34,13 +34,51 @@ async function api(action, payload) {
 /* ---------------- أدوات عامة ---------------- */
 function money(v) {
   const n = Number(v || 0);
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function todayStr() { return new Date().toISOString().slice(0, 10); }
-function monthStartStr() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10); }
+
+function dateKey(v) {
+  if (!v) return '';
+  if (typeof v === 'string') {
+    const m = v.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+    const d = new Date(v); if (!isNaN(d)) return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  const d = v instanceof Date ? v : new Date(v);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function prettyDate(v) {
+  const k=dateKey(v); if(!k) return '';
+  const [y,m,d]=k.split('-').map(Number);
+  const dt=new Date(y,m-1,d,12,0,0);
+  return dt.toLocaleDateString('ar-SA-u-ca-gregory-nu-latn',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}).replace('،','');
+}
+function fileToPayload(file) {
+  return new Promise((resolve,reject)=>{
+    if(!file) return resolve(null);
+    if(file.size > 3*1024*1024) return reject(new Error('حجم كل مرفق يجب ألا يتجاوز 3 MB.'));
+    if(!/^image\/(jpeg|png|webp)$/i.test(file.type||'')) return reject(new Error('المرفقات المسموحة: JPG / PNG / WEBP فقط.'));
+    const r=new FileReader();
+    r.onload=()=>resolve({name:file.name,mimeType:file.type,base64:String(r.result).split(',')[1]||''});
+    r.onerror=()=>reject(new Error('تعذر قراءة الملف.'));
+    r.readAsDataURL(file);
+  });
+}
+async function openSecureAttachment(fileId) {
+  const d=await api('getCustomerAttachmentData',{fileId});
+  const w=window.open('','_blank');
+  if(!w) return toast('اسمح بفتح النوافذ المنبثقة لعرض المرفق.','error');
+  w.document.write(`<title>${esc(d.name||'مرفق')}</title><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh}img{max-width:100%;max-height:100vh;object-fit:contain}</style><img src="data:${esc(d.mimeType)};base64,${d.base64}">`);
+  w.document.close();
+}
+function selectOptions(rows,valueKey,labelFn,placeholder){return `<option value="">${esc(placeholder||'اختر...')}</option>`+rows.map(r=>`<option value="${esc(r[valueKey])}">${labelFn(r)}</option>`).join('')}
+
+function todayStr() { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function monthStartStr() { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`; }
 
 function toast(msg, type) {
   const el = document.getElementById('toast');
@@ -93,7 +131,7 @@ const NAV = [
   { id: 'items', label: 'الأصناف', icon: 'items' },
   { id: 'invoices', label: 'الفواتير', icon: 'invoices' },
   { id: 'receipts', label: 'سندات القبض', icon: 'receipts' },
-  { id: 'discounts', label: 'الخصومات', icon: 'discounts' },
+  { id: 'refunds', label: 'الاستردادات', icon: 'receipts' },
   { id: 'statement', label: 'كشف حساب عميل', icon: 'statement' },
   { id: 'reports', label: 'التقارير', icon: 'reports' },
   { id: 'settings', label: 'الإعدادات', icon: 'settings', adminOnly: true },
@@ -238,206 +276,112 @@ function enterApp() {
 const VIEWS = {};
 
 /* ---------- لوحة التحكم ---------- */
-VIEWS.dashboard = async function (view) {
-  const d = await api('getDashboardData', {});
-  const [overdue, dueSoon] = await Promise.all([api('getOverdueInstallments', {}), api('getUpcomingInstallments', {})]);
-  view.innerHTML = `
-    <div class="stat-grid">
-      <div class="stat-card"><div class="label">عدد العملاء</div><div class="value num">${d.customers}</div></div>
-      <div class="stat-card"><div class="label">عدد الفواتير</div><div class="value num">${d.invoices}</div></div>
-      <div class="stat-card accent"><div class="label">إجمالي المبيعات</div><div class="value num">${money(d.totalSales)}</div></div>
-      <div class="stat-card good"><div class="label">إجمالي المحصّل</div><div class="value num">${money(d.totalCollected)}</div></div>
-      <div class="stat-card warn"><div class="label">إجمالي المتبقي</div><div class="value num">${money(d.totalOutstanding)}</div></div>
-      <div class="stat-card"><div class="label">تحصيل اليوم</div><div class="value num">${money(d.todayReceipts)}</div></div>
-      <div class="stat-card"><div class="label">فواتير اليوم</div><div class="value num">${d.todayInvoices}</div></div>
-      <div class="stat-card warn"><div class="label">أقساط متأخرة</div><div class="value num">${d.overdueCount} <small style="font-size:13px">(${money(d.overdueTotal)})</small></div></div>
-      <div class="stat-card"><div class="label">مستحقة قريبًا</div><div class="value num">${d.dueSoonCount} <small style="font-size:13px">(${money(d.dueSoonTotal)})</small></div></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h3>الأقساط المتأخرة</h3></div>
-      ${renderTable(
-        [{ label: 'الفاتورة', key: 'INVOICE_ID' }, { label: 'العميل', key: 'CUSTOMER_ID' }, { label: 'القسط رقم', key: 'NO' },
-         { label: 'تاريخ الاستحقاق', key: 'DUE_DATE' }, { label: 'المتبقي', render: r => `<span class="num">${money(r.BALANCE)}</span>` }],
-        overdue, 'لا توجد أقساط متأخرة حاليًا 🎉'
-      )}
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h3>مستحقة خلال الفترة القادمة</h3></div>
-      ${renderTable(
-        [{ label: 'الفاتورة', key: 'INVOICE_ID' }, { label: 'العميل', key: 'CUSTOMER_ID' }, { label: 'القسط رقم', key: 'NO' },
-         { label: 'تاريخ الاستحقاق', key: 'DUE_DATE' }, { label: 'المتبقي', render: r => `<span class="num">${money(r.BALANCE)}</span>` }],
-        dueSoon, 'لا توجد أقساط مستحقة قريبًا.'
-      )}
-    </div>`;
+VIEWS.dashboard = async function(view){
+  const d=await api('getWebDashboardData',{});
+  view.innerHTML=`
+  <div class="page-intro"><div><h3>ملخص النشاط</h3><p>قراءة مباشرة من الفواتير والسندات والأقساط السارية.</p></div><div class="date-chip">${prettyDate(d.date)}</div></div>
+  <div class="stat-grid">
+    <div class="stat-card"><div class="label">عدد العملاء</div><div class="value num">${d.customers}</div></div>
+    <div class="stat-card"><div class="label">الفواتير السارية</div><div class="value num">${d.invoices}</div></div>
+    <div class="stat-card accent"><div class="label">إجمالي المبيعات</div><div class="value num">${money(d.totalSales)}</div></div>
+    <div class="stat-card good"><div class="label">صافي التحصيل</div><div class="value num">${money(d.netCollected)}</div></div>
+    <div class="stat-card warn"><div class="label">إجمالي المتبقي</div><div class="value num">${money(d.totalOutstanding)}</div></div>
+    <div class="stat-card good"><div class="label">تحصيل اليوم من السندات</div><div class="value num">${money(d.todayReceipts)}</div></div>
+    <div class="stat-card"><div class="label">فواتير اليوم</div><div class="value num">${d.todayInvoices}</div></div>
+    <div class="stat-card warn"><div class="label">أقساط متأخرة</div><div class="value num">${d.overdueCount}<small> (${money(d.overdueTotal)})</small></div></div>
+    <div class="stat-card"><div class="label">مستحقة قريبًا</div><div class="value num">${d.dueSoonCount}<small> (${money(d.dueSoonTotal)})</small></div></div>
+  </div>
+  <div class="two-col">
+    <div class="panel"><div class="panel-head"><h3>الأقساط المتأخرة</h3></div>${renderTable([
+      {label:'الفاتورة',key:'INVOICE_NO'},{label:'العميل',key:'CUSTOMER_NAME'},{label:'الصنف',key:'ITEM_DESC'},
+      {label:'الاستحقاق',render:r=>prettyDate(r.DUE_DATE)},{label:'المتبقي',render:r=>`<span class="num">${money(r.BALANCE)}</span>`}
+    ],d.overdue,'لا توجد أقساط متأخرة.')}</div>
+    <div class="panel"><div class="panel-head"><h3>المستحقة قريبًا</h3></div>${renderTable([
+      {label:'الفاتورة',key:'INVOICE_NO'},{label:'العميل',key:'CUSTOMER_NAME'},{label:'الصنف',key:'ITEM_DESC'},
+      {label:'الاستحقاق',render:r=>prettyDate(r.DUE_DATE)},{label:'المتبقي',render:r=>`<span class="num">${money(r.BALANCE)}</span>`}
+    ],d.dueSoon,'لا توجد أقساط مستحقة قريبًا.')}</div>
+  </div>`;
 };
 
 /* ---------- العملاء ---------- */
-VIEWS.customers = async function (view) {
-  document.getElementById('topbarActions').innerHTML = `<button class="btn btn-primary" id="btnNewCustomer">${icon('plus')} إضافة عميل</button>`;
-  view.innerHTML = `
-    <div class="panel">
-      <div class="toolbar"><input class="search-input" id="custSearch" placeholder="ابحث بالاسم / الهاتف / رقم الهوية..."></div>
-      <div id="custTableWrap"></div>
-    </div>`;
-  const load = async (q) => {
-    const rows = await api('searchCustomers', { q: q || '' });
-    document.getElementById('custTableWrap').innerHTML = renderTable([
-      { label: 'الكود', key: 'CUSTOMER_ID' }, { label: 'الاسم', key: 'NAME' }, { label: 'الهاتف', key: 'PHONE' },
-      { label: 'المدينة', key: 'CITY' }, { label: 'الحالة', render: r => badge(r.STATUS, r.STATUS_LABEL) },
-      { label: '', render: r => `<button class="btn btn-sm" data-edit="${esc(r.CUSTOMER_ID)}">${icon('edit')} تعديل</button>` }
-    ], rows, 'لا يوجد عملاء بعد.');
-    document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openCustomerDrawer(b.dataset.edit));
-  };
-  document.getElementById('custSearch').addEventListener('input', e => load(e.target.value));
-  document.getElementById('btnNewCustomer').onclick = () => openCustomerDrawer(null);
-  await load('');
+VIEWS.customers = async function(view){
+  document.getElementById('topbarActions').innerHTML=`<button class="btn btn-primary" id="btnNewCustomer">${icon('plus')} إضافة عميل جديد</button>`;
+  const rows=await api('searchCustomers',{q:''});
+  view.innerHTML=`<div class="panel"><div class="panel-head"><h3>استعراض العملاء</h3></div><div class="toolbar lookup-toolbar">
+    <input class="search-input" id="custFilter" placeholder="بحث بالاسم / الجوال / الهوية...">
+    <select id="custSelect" class="wide-select">${selectOptions(rows,'CUSTOMER_ID',r=>`${esc(r.NAME)} — ${esc(r.PHONE||r.CUSTOMER_ID)}`,'اختر العميل')}</select>
+    <button class="btn btn-teal" id="custShow">عرض</button>
+  </div></div><div id="custCard"></div>
+  <div class="panel"><div class="panel-head"><h3>كشف العملاء</h3><span class="muted">${rows.length} عميل</span></div><div id="custTableWrap"></div></div>`;
+  const renderList=(list)=>{document.getElementById('custTableWrap').innerHTML=renderTable([
+    {label:'الكود',key:'CUSTOMER_ID'},{label:'الاسم',key:'NAME'},{label:'الهاتف',key:'PHONE'},{label:'المدينة',key:'CITY'},
+    {label:'الحالة',render:r=>badge(r.STATUS,r.STATUS_LABEL)},{label:'',render:r=>`<button class="btn btn-sm" data-cshow="${esc(r.CUSTOMER_ID)}">عرض</button>`}
+  ],list,'لا يوجد عملاء.'); document.querySelectorAll('[data-cshow]').forEach(b=>b.onclick=()=>showCustomerCard(b.dataset.cshow));};
+  renderList(rows);
+  document.getElementById('custFilter').oninput=async e=>{const list=await api('searchCustomers',{q:e.target.value});renderList(list);const sel=document.getElementById('custSelect');sel.innerHTML=selectOptions(list,'CUSTOMER_ID',r=>`${esc(r.NAME)} — ${esc(r.PHONE||r.CUSTOMER_ID)}`,'اختر العميل')};
+  document.getElementById('custShow').onclick=()=>{const id=document.getElementById('custSelect').value;if(!id)return toast('اختر العميل ثم اضغط عرض.','error');showCustomerCard(id)};
+  document.getElementById('btnNewCustomer').onclick=()=>openCustomerDrawer(null);
 };
-
-async function openCustomerDrawer(customerId) {
-  let c = { NAME: '', NATIONAL_ID: '', PHONE: '', ALT_PHONE: '', CITY: '', CREDIT_LIMIT: 0, NOTES: '', STATUS: 'ACTIVE' };
-  if (customerId) c = await api('getCustomerForView', { customerId });
-  const isAdmin = STORE.user.role === 'ADMIN';
-  openDrawer(customerId ? 'تعديل بيانات العميل' : 'إضافة عميل جديد', `
+async function showCustomerCard(customerId){
+  const [c,files]=await Promise.all([api('getCustomerForView',{customerId}),api('getCustomerAttachments',{customerId})]);
+  document.getElementById('custCard').innerHTML=`<div class="customer-card panel"><div class="panel-head"><div><h3>${esc(c.NAME)}</h3><span class="muted">${esc(c.CUSTOMER_ID)}</span></div><div>${badge(c.STATUS,c.STATUS_LABEL)}</div></div>
+  <div class="info-grid"><div><span>رقم الهوية</span><b>${esc(c.NATIONAL_ID||'—')}</b></div><div><span>الهاتف</span><b>${esc(c.PHONE||'—')}</b></div><div><span>هاتف بديل</span><b>${esc(c.ALT_PHONE||'—')}</b></div><div><span>المدينة</span><b>${esc(c.CITY||'—')}</b></div><div><span>الحد الائتماني</span><b class="num">${money(c.CREDIT_LIMIT)}</b></div><div><span>ملاحظات</span><b>${esc(c.NOTES||'—')}</b></div></div>
+  <div class="attachments"><h4>المرفقات</h4><div class="attachment-list">${files.length?files.map(f=>`<button class="attachment-link" data-file="${esc(f.FILE_ID)}">📎 ${esc(f.TYPE_LABEL)} <small>${esc(f.FILE_NAME)}</small></button>`).join(''):'<span class="muted">لا توجد مرفقات.</span>'}</div></div>
+  <div class="form-actions"><button class="btn btn-primary" id="editCustomer">تعديل البيانات</button><button class="btn" id="customerStatementBtn">كشف الحساب</button></div></div>`;
+  document.querySelectorAll('[data-file]').forEach(b=>b.onclick=()=>openSecureAttachment(b.dataset.file));
+  document.getElementById('editCustomer').onclick=()=>openCustomerDrawer(customerId);
+  document.getElementById('customerStatementBtn').onclick=()=>{goTo('statement');setTimeout(()=>loadStatementCustomer(customerId),100)};
+}
+async function openCustomerDrawer(customerId){
+  let c={NAME:'',NATIONAL_ID:'',PHONE:'',ALT_PHONE:'',CITY:'',CREDIT_LIMIT:'',NOTES:'',STATUS:'ACTIVE'};
+  if(customerId)c=await api('getCustomerForView',{customerId});
+  const isAdmin=STORE.user.role==='ADMIN';
+  openDrawer(customerId?'تعديل بيانات العميل':'إضافة عميل جديد',`
     <div class="form-field"><label>الاسم *</label><input id="f_name" value="${esc(c.NAME)}"></div>
-    <div class="form-row">
-      <div class="form-field"><label>رقم الهوية</label><input id="f_nid" value="${esc(c.NATIONAL_ID)}"></div>
-      <div class="form-field"><label>الهاتف</label><input id="f_phone" value="${esc(c.PHONE)}"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-field"><label>هاتف بديل</label><input id="f_altphone" value="${esc(c.ALT_PHONE)}"></div>
-      <div class="form-field"><label>المدينة</label><input id="f_city" value="${esc(c.CITY)}"></div>
-    </div>
-    <div class="form-field"><label>الحد الائتماني (0 = بدون حد)</label><input id="f_credit" type="number" step="0.01" value="${c.CREDIT_LIMIT || 0}"></div>
-    <div class="form-field"><label>ملاحظات</label><textarea id="f_notes">${esc(c.NOTES)}</textarea></div>
-    ${customerId && isAdmin ? `<div class="form-field"><label>الحالة</label>
-      <select id="f_status"><option value="ACTIVE" ${c.STATUS === 'ACTIVE' ? 'selected' : ''}>نشط</option>
-      <option value="INACTIVE" ${c.STATUS === 'INACTIVE' ? 'selected' : ''}>غير نشط</option></select></div>` : ''}
-    <div class="form-actions">
-      <button class="btn btn-primary" id="f_save">حفظ</button>
-      <button class="btn" id="f_cancel">إلغاء</button>
-    </div>`);
-  document.getElementById('f_cancel').onclick = closeDrawer;
-  document.getElementById('f_save').onclick = async (e) => {
-    const btn = e.target;
-    const data = {
-      name: document.getElementById('f_name').value, nationalId: document.getElementById('f_nid').value,
-      phone: document.getElementById('f_phone').value, altPhone: document.getElementById('f_altphone').value,
-      city: document.getElementById('f_city').value, creditLimit: document.getElementById('f_credit').value,
-      notes: document.getElementById('f_notes').value
-    };
-    setLoading(btn, true);
-    try {
-      if (customerId) {
-        await api('updateCustomer', { customerId, data });
-        const statusEl = document.getElementById('f_status');
-        if (statusEl && statusEl.value !== c.STATUS) await api('setCustomerStatus', { customerId, active: statusEl.value === 'ACTIVE' });
-      } else {
-        await api('saveCustomer', { data });
-      }
-      toast('تم الحفظ بنجاح', 'success');
-      closeDrawer();
-      goTo('customers');
-    } catch (err) { toast(err.message, 'error'); }
-    setLoading(btn, false);
-  };
+    <div class="form-row"><div class="form-field"><label>رقم الهوية</label><input id="f_nid" value="${esc(c.NATIONAL_ID)}"></div><div class="form-field"><label>الهاتف</label><input id="f_phone" value="${esc(c.PHONE)}"></div></div>
+    <div class="form-row"><div class="form-field"><label>هاتف بديل</label><input id="f_altphone" value="${esc(c.ALT_PHONE)}"></div><div class="form-field"><label>المدينة</label><input id="f_city" value="${esc(c.CITY)}"></div></div>
+    <div class="form-row"><div class="form-field"><label>الحد الائتماني</label><input id="f_credit" inputmode="decimal" value="${c.CREDIT_LIMIT||''}"></div><div class="form-field"><label>ملاحظات</label><input id="f_notes" value="${esc(c.NOTES)}"></div></div>
+    <hr class="divider"><h4>مرفقات العميل <small class="muted">(اختياري — بحد أقصى 3 MB للصورة)</small></h4>
+    <div class="form-field"><label>صورة الهوية</label><input id="f_idimg" type="file" accept="image/jpeg,image/png,image/webp"></div>
+    <div class="form-field"><label>صورة السند / المستند</label><input id="f_docimg" type="file" accept="image/jpeg,image/png,image/webp"></div>
+    <div class="form-field"><label>مرفق آخر</label><input id="f_otherimg" type="file" accept="image/jpeg,image/png,image/webp"></div>
+    ${customerId&&isAdmin?`<div class="form-field"><label>الحالة</label><select id="f_status"><option value="ACTIVE" ${c.STATUS==='ACTIVE'?'selected':''}>نشط</option><option value="INACTIVE" ${c.STATUS==='INACTIVE'?'selected':''}>غير نشط</option></select></div>`:''}
+    <div class="form-actions"><button class="btn btn-primary" id="f_save">حفظ</button><button class="btn" id="f_cancel">إلغاء</button></div>`);
+  document.getElementById('f_cancel').onclick=closeDrawer;
+  document.getElementById('f_save').onclick=async(e)=>{const btn=e.target;setLoading(btn,true);try{
+    const data={name:f_name.value,nationalId:f_nid.value,phone:f_phone.value,altPhone:f_altphone.value,city:f_city.value,creditLimit:f_credit.value,notes:f_notes.value};
+    let id=customerId;if(id){await api('updateCustomer',{customerId:id,data});const st=document.getElementById('f_status');if(st&&st.value!==c.STATUS)await api('setCustomerStatus',{customerId:id,active:st.value==='ACTIVE'});}else{const res=await api('saveCustomer',{data});id=res.id;}
+    const uploads=[['IDENTITY',f_idimg.files[0]],['DOCUMENT',f_docimg.files[0]],['OTHER',f_otherimg.files[0]]];
+    for(const [type,file] of uploads){if(file){const p=await fileToPayload(file);await api('uploadCustomerAttachment',{customerId:id,type,file:p});}}
+    toast('تم حفظ العميل ومرفقاته بنجاح','success');closeDrawer();goTo('customers');setTimeout(()=>showCustomerCard(id),150);
+  }catch(err){toast(err.message,'error')}setLoading(btn,false)};
 }
 
 /* ---------- الأصناف ---------- */
-VIEWS.items = async function (view) {
-  document.getElementById('topbarActions').innerHTML = `<button class="btn btn-primary" id="btnNewItem">${icon('plus')} إضافة صنف</button>`;
-  view.innerHTML = `
-    <div class="panel">
-      <div class="toolbar"><input class="search-input" id="itemSearch" placeholder="ابحث بالاسم / الفئة / الرقم التسلسلي..."></div>
-      <div id="itemTableWrap"></div>
-    </div>`;
-  const load = async (q) => {
-    const rows = await api('searchItems', { q: q || '' });
-    document.getElementById('itemTableWrap').innerHTML = renderTable([
-      { label: 'الكود', key: 'ITEM_ID' }, { label: 'الفئة', key: 'CATEGORY' }, { label: 'الاسم', key: 'NAME' },
-      { label: 'السعر', render: r => `<span class="num">${money(r.SALE_PRICE)}</span>` },
-      { label: 'الحالة', render: r => badge(r.STATUS, r.STATUS_LABEL) },
-      { label: '', render: r => `<button class="btn btn-sm" data-edit="${esc(r.ITEM_ID)}">${icon('edit')} تعديل</button>` }
-    ], rows, 'لا توجد أصناف بعد.');
-    document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openItemDrawer(b.dataset.edit));
-  };
-  document.getElementById('itemSearch').addEventListener('input', e => load(e.target.value));
-  document.getElementById('btnNewItem').onclick = () => openItemDrawer(null);
-  await load('');
+VIEWS.items=async function(view){
+  document.getElementById('topbarActions').innerHTML=`<button class="btn btn-primary" id="btnNewItem">${icon('plus')} إضافة صنف جديد</button>`;
+  const rows=await api('searchItems',{q:''});
+  view.innerHTML=`<div class="panel"><div class="panel-head"><h3>عرض وتعديل صنف</h3></div><div class="toolbar lookup-toolbar"><select id="itemSelect" class="wide-select">${selectOptions(rows,'ITEM_ID',r=>`${esc(r.NAME)} — ${esc(r.CATEGORY)} — ${money(r.SALE_PRICE)}`,'اختر الصنف')}</select><button class="btn btn-teal" id="itemShow">عرض</button></div></div><div id="itemCard"></div>
+  <div class="panel"><div class="panel-head"><h3>كل الأصناف</h3><span class="muted">${rows.length} صنف</span></div>${renderTable([{label:'الكود',key:'ITEM_ID'},{label:'الفئة',key:'CATEGORY'},{label:'الاسم',key:'NAME'},{label:'السعر',render:r=>`<span class="num">${money(r.SALE_PRICE)}</span>`},{label:'الحالة',render:r=>badge(r.STATUS,r.STATUS_LABEL)}],rows,'لا توجد أصناف.')}</div>`;
+  itemShow.onclick=()=>{if(!itemSelect.value)return toast('اختر الصنف أولًا.','error');showItemCard(itemSelect.value)};btnNewItem.onclick=()=>openItemDrawer(null);
 };
-
-async function openItemDrawer(itemId) {
-  const categories = await api('getItemCategories', {});
-  let it = { CATEGORY: '', NAME: '', SERIAL_NO: '', SPECS: '', SALE_PRICE: '', COST_PRICE: '', STATUS: 'AVAILABLE' };
-  if (itemId) it = await api('getItemForView', { itemId });
-  const isAdmin = STORE.user.role === 'ADMIN';
-  openDrawer(itemId ? 'تعديل الصنف' : 'إضافة صنف جديد', `
-    <div class="form-field"><label>الفئة *</label>
-      <input id="f_cat" list="catList" value="${esc(it.CATEGORY)}">
-      <datalist id="catList">${categories.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
-    </div>
-    <div class="form-field"><label>اسم الصنف *</label><input id="f_name" value="${esc(it.NAME)}"></div>
-    <div class="form-row">
-      <div class="form-field"><label>رقم تسلسلي (اختياري)</label><input id="f_serial" value="${esc(it.SERIAL_NO)}"></div>
-      <div class="form-field"><label>سعر البيع *</label><input id="f_price" type="number" step="0.01" value="${it.SALE_PRICE || ''}"></div>
-    </div>
-    <div class="form-field"><label>مواصفات حرة (سنة/لون/موديل/تفاصيل...)</label><textarea id="f_specs">${esc(it.SPECS)}</textarea></div>
-    ${isAdmin ? `<div class="form-field"><label>سعر التكلفة (لحساب هامش الربح، لا يظهر للعميل)</label><input id="f_cost" type="number" step="0.01" value="${it.COST_PRICE || ''}"></div>` : ''}
-    ${itemId && isAdmin ? `<div class="form-field"><label>الحالة</label>
-      <select id="f_status">${['AVAILABLE', 'RESERVED', 'SOLD'].map(s => `<option value="${s}" ${it.STATUS === s ? 'selected' : ''}>${{ AVAILABLE: 'متاح', RESERVED: 'محجوز', SOLD: 'مباع' }[s]}</option>`).join('')}</select></div>` : ''}
-    <div class="form-actions">
-      <button class="btn btn-primary" id="f_save">حفظ</button>
-      <button class="btn" id="f_cancel">إلغاء</button>
-    </div>`);
-  document.getElementById('f_cancel').onclick = closeDrawer;
-  document.getElementById('f_save').onclick = async (e) => {
-    const btn = e.target;
-    const data = {
-      category: document.getElementById('f_cat').value, name: document.getElementById('f_name').value,
-      serialNo: document.getElementById('f_serial').value, specs: document.getElementById('f_specs').value,
-      salePrice: document.getElementById('f_price').value,
-      costPrice: document.getElementById('f_cost') ? document.getElementById('f_cost').value : (it.COST_PRICE || 0)
-    };
-    setLoading(btn, true);
-    try {
-      if (itemId) {
-        await api('updateItem', { itemId, data });
-        const statusEl = document.getElementById('f_status');
-        if (statusEl && statusEl.value !== it.STATUS) await api('setItemStatus', { itemId, status: statusEl.value });
-      } else {
-        await api('saveItem', { data });
-      }
-      toast('تم الحفظ بنجاح', 'success');
-      closeDrawer();
-      goTo('items');
-    } catch (err) { toast(err.message, 'error'); }
-    setLoading(btn, false);
-  };
+async function showItemCard(id){const it=await api('getItemForView',{itemId:id});document.getElementById('itemCard').innerHTML=`<div class="panel customer-card"><div class="panel-head"><div><h3>${esc(it.NAME)}</h3><span class="muted">${esc(it.ITEM_ID)}</span></div>${badge(it.STATUS,it.STATUS_LABEL)}</div><div class="info-grid"><div><span>الفئة</span><b>${esc(it.CATEGORY)}</b></div><div><span>الرقم التسلسلي</span><b>${esc(it.SERIAL_NO||'—')}</b></div><div><span>سعر البيع</span><b class="num">${money(it.SALE_PRICE)}</b></div><div><span>سعر التكلفة</span><b class="num">${STORE.user.role==='ADMIN'?money(it.COST_PRICE):'—'}</b></div><div class="span2"><span>المواصفات</span><b>${esc(it.SPECS||'—')}</b></div></div><div class="form-actions"><button class="btn btn-primary" id="editItem">تعديل الصنف</button></div></div>`;editItem.onclick=()=>openItemDrawer(id)}
+async function openItemDrawer(itemId){
+ const cats=await api('getItemCategories',{});let it={CATEGORY:'',NAME:'',SERIAL_NO:'',SPECS:'',SALE_PRICE:'',COST_PRICE:'',STATUS:'AVAILABLE'};if(itemId)it=await api('getItemForView',{itemId});const adm=STORE.user.role==='ADMIN';
+ openDrawer(itemId?'تعديل الصنف':'إضافة صنف جديد',`<div class="form-row"><div class="form-field"><label>الفئة *</label><input id="f_cat" list="catList" value="${esc(it.CATEGORY)}"><datalist id="catList">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div><div class="form-field"><label>اسم الصنف *</label><input id="f_name" value="${esc(it.NAME)}"></div></div><div class="form-row"><div class="form-field"><label>الرقم التسلسلي</label><input id="f_serial" value="${esc(it.SERIAL_NO)}"></div><div class="form-field"><label>سعر البيع</label><input id="f_price" inputmode="decimal" value="${it.SALE_PRICE||''}"></div></div><div class="form-field"><label>المواصفات</label><textarea id="f_specs">${esc(it.SPECS)}</textarea></div>${adm?`<div class="form-field"><label>سعر التكلفة</label><input id="f_cost" inputmode="decimal" value="${it.COST_PRICE||''}"></div>`:''}${itemId&&adm?`<div class="form-field"><label>الحالة</label><select id="f_status">${['AVAILABLE','RESERVED','SOLD'].map(x=>`<option value="${x}" ${it.STATUS===x?'selected':''}>${{AVAILABLE:'متاح',RESERVED:'محجوز',SOLD:'مباع'}[x]}</option>`).join('')}</select></div>`:''}<div class="form-actions"><button class="btn btn-primary" id="f_save">حفظ</button><button class="btn" id="f_cancel">إلغاء</button></div>`);
+ f_cancel.onclick=closeDrawer;f_save.onclick=async(e)=>{setLoading(e.target,true);try{const data={category:f_cat.value,name:f_name.value,serialNo:f_serial.value,specs:f_specs.value,salePrice:f_price.value,costPrice:document.getElementById('f_cost')?f_cost.value:(it.COST_PRICE||0)};if(itemId){await api('updateItem',{itemId,data});const st=document.getElementById('f_status');if(st&&st.value!==it.STATUS)await api('setItemStatus',{itemId,status:st.value});}else await api('saveItem',{data});toast('تم حفظ الصنف','success');closeDrawer();goTo('items')}catch(err){toast(err.message,'error')}setLoading(e.target,false)};
 }
 
 /* ---------- الفواتير ---------- */
-VIEWS.invoices = async function (view) {
-  document.getElementById('topbarActions').innerHTML = `<button class="btn btn-primary" id="btnNewInvoice">${icon('plus')} فاتورة جديدة</button>`;
-  view.innerHTML = `
-    <div class="panel">
-      <div class="toolbar"><input class="search-input" id="invSearch" placeholder="ابحث برقم الفاتورة / اسم العميل / الصنف..."></div>
-      <div id="invTableWrap"></div>
-    </div>`;
-  const load = async (q) => {
-    const rows = await api('searchInvoices', { q: q || '' });
-    document.getElementById('invTableWrap').innerHTML = renderTable([
-      { label: 'رقم الفاتورة', key: 'INVOICE_NO' }, { label: 'التاريخ', key: 'DATE' }, { label: 'العميل', key: 'CUSTOMER_NAME' },
-      { label: 'الصنف', key: 'ITEM_DESC' }, { label: 'الإجمالي', render: r => `<span class="num">${money(r.TOTAL)}</span>` },
-      { label: 'الحالة', render: r => badge(r.STATUS, r.STATUS_LABEL) },
-      { label: '', render: r => `<button class="btn btn-sm" data-view="${esc(r.INVOICE_ID)}">${icon('eye')} عرض</button>` }
-    ], rows, 'لا توجد فواتير بعد.');
-    document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => openInvoiceDetail(b.dataset.view));
-  };
-  document.getElementById('invSearch').addEventListener('input', e => load(e.target.value));
-  document.getElementById('btnNewInvoice').onclick = openNewInvoiceDrawer;
-  await load('');
+VIEWS.invoices=async function(view){
+ document.getElementById('topbarActions').innerHTML=`<button class="btn btn-primary" id="btnNewInvoice">${icon('plus')} فاتورة جديدة</button>`;
+ let rows=await api('searchInvoices',{q:''});
+ view.innerHTML=`<div class="panel"><div class="panel-head"><h3>بحث وعرض فاتورة</h3></div><div class="toolbar lookup-toolbar"><input class="search-input" id="invSearch" placeholder="رقم الفاتورة / العميل / الصنف"><select id="invSelect" class="wide-select">${selectOptions(rows,'INVOICE_ID',r=>`${esc(r.INVOICE_NO)} — ${esc(r.CUSTOMER_NAME)} — ${esc(r.ITEM_DESC)}`,'اختر الفاتورة')}</select><button class="btn btn-teal" id="invShow">عرض</button><button class="btn btn-danger" id="invCancel" ${STORE.user.role!=='ADMIN'?'disabled':''}>إلغاء الفاتورة</button></div></div><div id="invoiceSelectedCard"></div><div class="panel"><div class="panel-head"><h3>كل الفواتير</h3></div><div id="invTableWrap"></div></div>`;
+ const draw=(list)=>{rows=list;invSelect.innerHTML=selectOptions(list,'INVOICE_ID',r=>`${esc(r.INVOICE_NO)} — ${esc(r.CUSTOMER_NAME)} — ${esc(r.ITEM_DESC)}`,'اختر الفاتورة');invTableWrap.innerHTML=renderTable([{label:'رقم الفاتورة',key:'INVOICE_NO'},{label:'التاريخ',render:r=>prettyDate(r.DATE)},{label:'العميل',key:'CUSTOMER_NAME'},{label:'الصنف',key:'ITEM_DESC'},{label:'الإجمالي',render:r=>`<span class="num">${money(r.TOTAL)}</span>`},{label:'الحالة',render:r=>badge(r.STATUS,r.STATUS_LABEL)},{label:'',render:r=>`<button class="btn btn-sm" data-ishow="${esc(r.INVOICE_ID)}">عرض</button>`}],list,'لا توجد فواتير.');document.querySelectorAll('[data-ishow]').forEach(b=>b.onclick=()=>{invSelect.value=b.dataset.ishow;showSelectedInvoice(b.dataset.ishow)})};
+ draw(rows);invSearch.oninput=async e=>draw(await api('searchInvoices',{q:e.target.value}));invShow.onclick=()=>{if(!invSelect.value)return toast('اختر الفاتورة ثم اضغط عرض.','error');showSelectedInvoice(invSelect.value)};invCancel.onclick=()=>cancelSelectedInvoice();btnNewInvoice.onclick=openNewInvoiceDrawer;
 };
+async function showSelectedInvoice(id){await openInvoiceDetail(id,true)}
+async function cancelSelectedInvoice(){const id=document.getElementById('invSelect')?.value;if(!id)return toast('اختر الفاتورة المطلوب إلغاؤها أولًا.','error');const info=await api('getInvoiceCancellationInfo',{invoiceId:id});if(!info.canCancel)return toast(`يوجد ${money(info.unresolved)} ريال يجب عكسه أو استرداده قبل إلغاء الفاتورة.`,'error');const reason=prompt('اكتب سبب إلغاء الفاتورة:');if(!reason)return;await api('cancelInvoice',{invoiceId:id,reason});toast('تم إلغاء الفاتورة','success');goTo('invoices')}
 
 function searchPicker(inputEl, resultsEl, searchFn, renderLabel, onPick) {
   let timer;
@@ -555,7 +499,7 @@ async function openInvoiceDetail(invoiceId) {
     <div class="kv">
       <dt>العميل</dt><dd>${esc(inv.CUSTOMER_NAME)}</dd>
       <dt>الصنف</dt><dd>${esc(inv.ITEM_DESC)}</dd>
-      <dt>التاريخ</dt><dd>${esc(inv.DATE)}</dd>
+      <dt>التاريخ</dt><dd>${prettyDate(inv.DATE)}</dd>
       <dt>الحالة</dt><dd>${badge(inv.STATUS, inv.STATUS_LABEL)}</dd>
       <dt>الإجمالي</dt><dd class="num">${money(inv.TOTAL)}</dd>
       <dt>الدفعة المقدمة</dt><dd class="num">${money(inv.DOWN_PAYMENT)}</dd>
@@ -564,7 +508,7 @@ async function openInvoiceDetail(invoiceId) {
     <hr class="divider">
     <h4 style="margin-bottom:10px">جدول الأقساط</h4>
     ${renderTable([
-      { label: '#', key: 'NO' }, { label: 'الاستحقاق', key: 'DUE_DATE' },
+      { label: '#', key: 'NO' }, { label: 'الاستحقاق', render: r => prettyDate(r.DUE_DATE) },
       { label: 'القيمة', render: r => `<span class="num">${money(r.AMOUNT)}</span>` },
       { label: 'المتبقي', render: r => `<span class="num">${money(r.BALANCE)}</span>` },
       { label: 'الحالة', render: r => badge(r.STATUS, r.STATUS_LABEL) }
@@ -572,208 +516,47 @@ async function openInvoiceDetail(invoiceId) {
     <div class="form-actions">
       ${inv.PDF_URL ? `<a class="btn" target="_blank" href="${esc(inv.PDF_URL)}">فتح PDF</a>` : ''}
       ${inv.STATUS !== 'CANCELLED' ? `<button class="btn btn-teal" id="f_topay">تسجيل تحصيل</button>` : ''}
-      ${inv.STATUS === 'ACTIVE' && isAdmin ? `<button class="btn btn-danger" id="f_cancelInv">إلغاء الفاتورة</button>` : ''}
     </div>
     ${inv.CANCEL_REASON ? `<p class="form-help">سبب الإلغاء: ${esc(inv.CANCEL_REASON)}</p>` : ''}`);
 
   const topay = document.getElementById('f_topay');
   if (topay) topay.onclick = () => { closeDrawer(); openReceiptDrawer(null, inv); };
 
-  const cancelBtn = document.getElementById('f_cancelInv');
-  if (cancelBtn) cancelBtn.onclick = async () => {
-    const reason = prompt('اكتب سبب إلغاء الفاتورة (مطلوب للتدقيق):');
-    if (!reason) return;
-    try {
-      await api('cancelInvoice', { invoiceId, reason });
-      toast('تم إلغاء الفاتورة', 'success');
-      closeDrawer();
-      goTo('invoices');
-    } catch (err) { toast(err.message, 'error'); }
-  };
 }
+
 
 /* ---------- سندات القبض ---------- */
-VIEWS.receipts = async function (view) {
-  document.getElementById('topbarActions').innerHTML = `<button class="btn btn-primary" id="btnNewReceipt">${icon('plus')} سند قبض جديد</button>`;
-  view.innerHTML = `
-    <div class="panel">
-      <div class="toolbar"><input class="search-input" id="recSearch" placeholder="ابحث برقم السند / العميل / رقم الفاتورة..."></div>
-      <div id="recTableWrap"></div>
-    </div>`;
-  const load = async (q) => {
-    const rows = await api('searchReceipts', { q: q || '' });
-    document.getElementById('recTableWrap').innerHTML = renderTable([
-      { label: 'رقم السند', key: 'RECEIPT_NO' }, { label: 'التاريخ', key: 'DATE' }, { label: 'العميل', key: 'CUSTOMER_NAME' },
-      { label: 'الفاتورة', key: 'INVOICE_NO' }, { label: 'المبلغ', render: r => `<span class="num">${money(r.AMOUNT)}</span>` },
-      { label: 'طريقة الدفع', key: 'PAYMENT_METHOD' },
-      { label: '', render: r => `<button class="btn btn-sm" data-edit="${esc(r.RECEIPT_ID)}">${icon('edit')} تعديل</button>` }
-    ], rows, 'لا توجد سندات قبض بعد.');
-    document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openReceiptDrawer(b.dataset.edit, null));
-  };
-  document.getElementById('recSearch').addEventListener('input', e => load(e.target.value));
-  document.getElementById('btnNewReceipt').onclick = () => openReceiptDrawer(null, null);
-  await load('');
+VIEWS.receipts=async function(view){
+ document.getElementById('topbarActions').innerHTML=`<button class="btn btn-primary" id="btnNewReceipt">${icon('plus')} سند قبض جديد</button>`;
+ let rows=await api('searchReceipts',{q:''});
+ view.innerHTML=`<div class="panel"><div class="panel-head"><h3>سندات القبض</h3></div><div class="toolbar lookup-toolbar"><input class="search-input" id="recSearch" placeholder="السند / العميل / الفاتورة"><select id="recSelect" class="wide-select">${selectOptions(rows,'RECEIPT_ID',r=>`${esc(r.RECEIPT_NO)} — ${esc(r.CUSTOMER_NAME)} — ${money(r.AMOUNT)}`,'اختر سند القبض')}</select><button class="btn btn-teal" id="recShow">عرض</button></div></div><div id="recTableWrap" class="panel"></div>`;
+ const draw=list=>{rows=list;recSelect.innerHTML=selectOptions(list,'RECEIPT_ID',r=>`${esc(r.RECEIPT_NO)} — ${esc(r.CUSTOMER_NAME)} — ${money(r.AMOUNT)}`,'اختر سند القبض');recTableWrap.innerHTML=renderTable([{label:'السند',key:'RECEIPT_NO'},{label:'التاريخ',render:r=>prettyDate(r.DATE)},{label:'العميل',key:'CUSTOMER_NAME'},{label:'الفاتورة',key:'INVOICE_NO'},{label:'المبلغ',render:r=>`<span class="num">${money(r.AMOUNT)}</span>`},{label:'الحالة',render:r=>badge(r.STATUS||'ACTIVE',r.STATUS==='REVERSED'?'معكوس':'ساري')},{label:'',render:r=>`<button class="btn btn-sm" data-rshow="${esc(r.RECEIPT_ID)}">عرض</button>`}],list,'لا توجد سندات.');document.querySelectorAll('[data-rshow]').forEach(b=>b.onclick=()=>openReceiptDrawer(b.dataset.rshow,null))};draw(rows);recSearch.oninput=async e=>draw(await api('searchReceipts',{q:e.target.value}));recShow.onclick=()=>{if(!recSelect.value)return toast('اختر السند أولًا.','error');openReceiptDrawer(recSelect.value,null)};btnNewReceipt.onclick=()=>openReceiptDrawer(null,null);
 };
-
-async function openReceiptDrawer(receiptId, presetInvoice) {
-  let invoiceInfo = null, r = { AMOUNT: '', PAYMENT_METHOD: 'نقدي', REFERENCE_NO: '', NOTES: '' };
-  if (receiptId) { r = await api('getReceiptForEdit', { receiptId }); invoiceInfo = r.invoice; }
-  else if (presetInvoice) invoiceInfo = await api('getInvoicePaymentInfo', { invoiceId: presetInvoice.INVOICE_ID });
-
-  openDrawer(receiptId ? 'تعديل سند القبض ' + r.RECEIPT_NO : 'سند قبض جديد', `
-    <div class="form-field"><label>الفاتورة *</label>
-      <input id="f_invq" placeholder="اكتب رقم الفاتورة أو اسم العميل..." ${invoiceInfo ? 'style="display:none"' : ''}>
-      <div id="f_invResults" class="pick-results"></div>
-      <div id="f_invPicked" class="form-help">${invoiceInfo ? `الفاتورة ${esc(invoiceInfo.INVOICE_NO)} — ${esc(invoiceInfo.CUSTOMER_NAME)} — المتاح: <span class="num">${money(invoiceInfo.BALANCE_AVAILABLE)}</span>` : ''}</div>
-    </div>
-    <div class="form-field"><label>المبلغ *</label><input id="f_amount" type="number" step="0.01" value="${r.AMOUNT || ''}"></div>
-    <div class="form-help" id="f_remainPreview"></div>
-    <div class="form-field"><label>طريقة الدفع</label>
-      <select id="f_method"><option ${r.PAYMENT_METHOD === 'نقدي' ? 'selected' : ''}>نقدي</option>
-      <option ${r.PAYMENT_METHOD === 'تحويل بنكي' ? 'selected' : ''}>تحويل بنكي</option>
-      <option ${r.PAYMENT_METHOD === 'شبكة' ? 'selected' : ''}>شبكة</option>
-      <option ${r.PAYMENT_METHOD === 'شيك' ? 'selected' : ''}>شيك</option></select>
-    </div>
-    <div class="form-field"><label>مرجع/رقم الحوالة</label><input id="f_ref" value="${esc(r.REFERENCE_NO)}"></div>
-    <div class="form-field"><label>ملاحظات</label><textarea id="f_notes">${esc(r.NOTES)}</textarea></div>
-    <div class="form-actions">
-      <button class="btn btn-primary" id="f_save">حفظ</button>
-      <button class="btn" id="f_cancel">إلغاء</button>
-    </div>
-    ${r.PDF_URL ? `<a class="btn-link" target="_blank" href="${esc(r.PDF_URL)}">فتح PDF السند</a>` : ''}`);
-
-  if (!invoiceInfo) {
-    searchPicker(document.getElementById('f_invq'), document.getElementById('f_invResults'),
-      q => api('searchInvoices', { q }), x => `${esc(x.INVOICE_NO)} — ${esc(x.CUSTOMER_NAME)} — ${money(x.TOTAL)}`,
-      async x => {
-        invoiceInfo = await api('getInvoicePaymentInfo', { invoiceId: x.INVOICE_ID });
-        document.getElementById('f_invPicked').innerHTML = `الفاتورة ${esc(invoiceInfo.INVOICE_NO)} — ${esc(invoiceInfo.CUSTOMER_NAME)} — المتاح: <span class="num">${money(invoiceInfo.BALANCE_AVAILABLE)}</span>`;
-        document.getElementById('f_invq').value = '';
-      });
-  }
-
-  document.getElementById('f_amount').addEventListener('input', () => {
-    if (!invoiceInfo) return;
-    const amt = Number(document.getElementById('f_amount').value || 0);
-    document.getElementById('f_remainPreview').textContent = 'المتبقي الجديد على الفاتورة: ' + money(invoiceInfo.BALANCE_AVAILABLE - amt);
-  });
-
-  document.getElementById('f_cancel').onclick = closeDrawer;
-  document.getElementById('f_save').onclick = async (e) => {
-    const btn = e.target;
-    if (!invoiceInfo) return toast('اختر الفاتورة أولاً', 'error');
-    const data = {
-      invoiceId: invoiceInfo.INVOICE_ID, amount: document.getElementById('f_amount').value,
-      paymentMethod: document.getElementById('f_method').value, referenceNo: document.getElementById('f_ref').value,
-      notes: document.getElementById('f_notes').value
-    };
-    setLoading(btn, true);
-    try {
-      if (receiptId) await api('updateReceipt', { receiptId, data });
-      else await api('createReceipt', { data });
-      toast('تم حفظ السند بنجاح', 'success');
-      closeDrawer();
-      goTo('receipts');
-    } catch (err) { toast(err.message, 'error'); }
-    setLoading(btn, false);
-  };
+async function openReceiptDrawer(receiptId,presetInvoice){
+ let invoiceInfo=null,r={AMOUNT:'',PAYMENT_METHOD:'نقدي',REFERENCE_NO:'',NOTES:'',STATUS:'ACTIVE'};if(receiptId){r=await api('getReceiptForEdit',{receiptId});invoiceInfo=r.invoice}else if(presetInvoice)invoiceInfo=await api('getInvoicePaymentInfo',{invoiceId:presetInvoice.INVOICE_ID});const reversed=String(r.STATUS||'ACTIVE')==='REVERSED';
+ openDrawer(receiptId?`سند القبض ${r.RECEIPT_NO}`:'سند قبض جديد',`<div class="form-field"><label>الفاتورة *</label><input id="f_invq" placeholder="ابحث بالفاتورة أو العميل" ${invoiceInfo?'style="display:none"':''}><div id="f_invResults" class="pick-results"></div><div id="f_invPicked" class="form-help">${invoiceInfo?`الفاتورة ${esc(invoiceInfo.INVOICE_NO)} — ${esc(invoiceInfo.CUSTOMER_NAME)} — المتاح: <span class="num">${money(invoiceInfo.BALANCE_AVAILABLE)}</span>`:''}</div></div><div class="form-field"><label>المبلغ *</label><input id="f_amount" inputmode="decimal" value="${r.AMOUNT||''}" ${reversed?'disabled':''}></div><div class="form-help" id="f_remainPreview"></div><div class="form-field"><label>طريقة الدفع</label><select id="f_method" ${reversed?'disabled':''}><option ${r.PAYMENT_METHOD==='نقدي'?'selected':''}>نقدي</option><option ${r.PAYMENT_METHOD==='تحويل بنكي'?'selected':''}>تحويل بنكي</option><option ${r.PAYMENT_METHOD==='شبكة'?'selected':''}>شبكة</option><option ${r.PAYMENT_METHOD==='شيك'?'selected':''}>شيك</option></select></div><div class="form-field"><label>المرجع</label><input id="f_ref" value="${esc(r.REFERENCE_NO)}" ${reversed?'disabled':''}></div><div class="form-field"><label>ملاحظات</label><textarea id="f_notes" ${reversed?'disabled':''}>${esc(r.NOTES)}</textarea></div>${reversed?`<div class="alert danger">هذا السند معكوس. ${esc(r.REVERSE_REASON||'')}</div>`:''}<div class="form-actions">${!reversed?`<button class="btn btn-primary" id="f_save">حفظ</button>`:''}${receiptId&&!reversed&&STORE.user.role==='ADMIN'?`<button class="btn btn-danger" id="f_reverse">عكس سند القبض</button>`:''}<button class="btn" id="f_cancel">إغلاق</button></div>${r.PDF_URL?`<a class="btn-link" target="_blank" href="${esc(r.PDF_URL)}">فتح PDF</a>`:''}`);
+ if(!invoiceInfo){searchPicker(f_invq,f_invResults,q=>api('searchInvoices',{q}),x=>`${esc(x.INVOICE_NO)} — ${esc(x.CUSTOMER_NAME)} — ${esc(x.ITEM_DESC)}`,async x=>{invoiceInfo=await api('getInvoicePaymentInfo',{invoiceId:x.INVOICE_ID});f_invPicked.innerHTML=`الفاتورة ${esc(invoiceInfo.INVOICE_NO)} — ${esc(invoiceInfo.CUSTOMER_NAME)} — المتاح: <span class="num">${money(invoiceInfo.BALANCE_AVAILABLE)}</span>`;f_invq.value=''})}
+ f_cancel.onclick=closeDrawer;if(document.getElementById('f_amount'))f_amount.oninput=()=>{if(invoiceInfo)f_remainPreview.textContent='المتبقي الجديد: '+money(invoiceInfo.BALANCE_AVAILABLE-Number(f_amount.value||0))};
+ const sv=document.getElementById('f_save');if(sv)sv.onclick=async e=>{if(!invoiceInfo)return toast('اختر الفاتورة أولًا.','error');setLoading(e.target,true);try{const data={invoiceId:invoiceInfo.INVOICE_ID,amount:f_amount.value,paymentMethod:f_method.value,referenceNo:f_ref.value,notes:f_notes.value};if(receiptId)await api('updateReceipt',{receiptId,data});else await api('createReceipt',{data});toast('تم حفظ السند','success');closeDrawer();goTo('receipts')}catch(err){toast(err.message,'error')}setLoading(e.target,false)};
+ const rv=document.getElementById('f_reverse');if(rv)rv.onclick=async()=>{const reason=prompt('سبب عكس سند القبض:');if(!reason)return;try{await api('reverseReceipt',{receiptId,reason});toast('تم عكس سند القبض','success');closeDrawer();goTo('receipts')}catch(err){toast(err.message,'error')}};
 }
-
-/* ---------- الخصومات (سجل قراءة فقط — تُنشأ تلقائيًا مع الفاتورة) ---------- */
-VIEWS.discounts = async function (view) {
-  const rows = await api('getAllDiscounts', {});
-  view.innerHTML = `
-    <div class="panel">
-      <div class="panel-head"><h3>سجل الخصومات</h3></div>
-      ${renderTable([
-        { label: 'رقم الخصم', key: 'DISCOUNT_NO' }, { label: 'التاريخ', key: 'DATE' }, { label: 'العميل', key: 'CUSTOMER_NAME' },
-        { label: 'الفاتورة', key: 'INVOICE_NO' }, { label: 'القيمة', render: r => `<span class="num">${money(r.AMOUNT)}</span>` },
-        { label: 'السبب', key: 'REASON' }
-      ], rows, 'لا توجد خصومات مسجلة بعد.')}
-    </div>`;
+/* ---------- الاستردادات ---------- */
+VIEWS.refunds=async function(view){
+ document.getElementById('topbarActions').innerHTML=`<button class="btn btn-primary" id="btnNewRefund">${icon('plus')} سند استرداد جديد</button>`;const rows=await api('listRefunds',{});view.innerHTML=`<div class="panel"><div class="panel-head"><h3>سندات الاسترداد</h3></div>${renderTable([{label:'السند',key:'REFUND_NO'},{label:'التاريخ',render:r=>prettyDate(r.DATE)},{label:'العميل',key:'CUSTOMER_NAME'},{label:'الفاتورة',key:'INVOICE_NO'},{label:'سند القبض',key:'RECEIPT_NO'},{label:'المبلغ',render:r=>`<span class="num">${money(r.AMOUNT)}</span>`}],rows,'لا توجد استردادات.')}</div>`;btnNewRefund.onclick=openRefundDrawer;
 };
+async function openRefundDrawer(){const choices=await api('getRefundableReceipts',{});openDrawer('سند استرداد للعميل',`<div class="form-field"><label>سند القبض الأصلي</label><select id="rf_receipt">${selectOptions(choices,'RECEIPT_ID',r=>`${esc(r.CUSTOMER_NAME)} — ${esc(r.INVOICE_NO)} — ${esc(r.RECEIPT_NO)} — متاح ${money(r.REFUNDABLE)}`,'اختر سند القبض')}</select></div><div id="rf_info" class="form-help"></div><div class="form-field"><label>المبلغ</label><input id="rf_amount" inputmode="decimal"></div><div class="form-field"><label>طريقة الاسترداد</label><select id="rf_method"><option>نقدي</option><option>تحويل بنكي</option><option>شبكة</option><option>شيك</option></select></div><div class="form-field"><label>المرجع</label><input id="rf_ref"></div><div class="form-field"><label>سبب الاسترداد *</label><textarea id="rf_reason"></textarea></div><div class="form-actions"><button class="btn btn-primary" id="rf_save">حفظ الاسترداد</button><button class="btn" id="rf_cancel">إلغاء</button></div>`);rf_cancel.onclick=closeDrawer;rf_receipt.onchange=()=>{const x=choices.find(v=>v.RECEIPT_ID===rf_receipt.value);if(x){rf_info.innerHTML=`${esc(x.CUSTOMER_NAME)} — ${esc(x.ITEM_DESC||'')} — المتاح <b class="num">${money(x.REFUNDABLE)}</b>`;rf_amount.value=x.REFUNDABLE}};rf_save.onclick=async e=>{if(!rf_receipt.value)return toast('اختر سند القبض.','error');if(!rf_reason.value.trim())return toast('سبب الاسترداد مطلوب.','error');setLoading(e.target,true);try{await api('createRefund',{data:{receiptId:rf_receipt.value,amount:rf_amount.value,paymentMethod:rf_method.value,referenceNo:rf_ref.value,reason:rf_reason.value}});toast('تم إنشاء سند الاسترداد','success');closeDrawer();goTo('refunds')}catch(err){toast(err.message,'error')}setLoading(e.target,false)}}
 
 /* ---------- كشف حساب عميل ---------- */
-VIEWS.statement = async function (view) {
-  view.innerHTML = `
-    <div class="panel">
-      <div class="panel-body">
-        <div class="form-field"><label>ابحث عن العميل</label>
-          <input id="stCustq" class="search-input" placeholder="اكتب اسم العميل أو رقم الجوال...">
-          <div id="stCustResults" class="pick-results"></div>
-        </div>
-      </div>
-    </div>
-    <div id="stResult"></div>`;
-  searchPicker(document.getElementById('stCustq'), document.getElementById('stCustResults'),
-    q => api('searchCustomers', { q }), r => `${esc(r.NAME)} — ${esc(r.PHONE || '')}`,
-    async r => {
-      document.getElementById('stCustq').value = r.NAME;
-      document.getElementById('stCustResults').innerHTML = '';
-      const st = await api('getCustomerStatement', { customerId: r.CUSTOMER_ID });
-      document.getElementById('stResult').innerHTML = `
-        <div class="stat-grid">
-          <div class="stat-card"><div class="label">إجمالي الفواتير</div><div class="value num">${money(st.totals.totalInvoices)}</div></div>
-          <div class="stat-card good"><div class="label">إجمالي المحصّل</div><div class="value num">${money(st.totals.totalPaid)}</div></div>
-          <div class="stat-card"><div class="label">إجمالي الخصومات</div><div class="value num">${money(st.totals.totalDiscounts)}</div></div>
-          <div class="stat-card warn"><div class="label">المتبقي</div><div class="value num">${money(st.totals.outstanding)}</div></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h3>حركة الحساب</h3>
-            <button class="btn btn-sm" id="btnStPdf">تصدير PDF</button>
-          </div>
-          ${renderTable([
-            { label: 'التاريخ', key: 'date' }, { label: 'النوع', key: 'typeLabel' }, { label: 'المرجع', key: 'refNo' },
-            { label: 'البيان', key: 'description' }, { label: 'مدين', render: x => `<span class="num">${x.debit ? money(x.debit) : ''}</span>` },
-            { label: 'دائن', render: x => `<span class="num">${x.credit ? money(x.credit) : ''}</span>` },
-            { label: 'الرصيد', render: x => `<span class="num">${money(x.balance)}</span>` }
-          ], st.rows, 'لا توجد حركات على هذا العميل بعد.')}
-        </div>`;
-      document.getElementById('btnStPdf').onclick = async () => {
-        try { const pdf = await api('createCustomerStatementPdf', { customerId: r.CUSTOMER_ID }); window.open(pdf.url, '_blank'); }
-        catch (err) { toast(err.message, 'error'); }
-      };
-    });
-};
+VIEWS.statement=async function(view){const rows=await api('searchCustomers',{q:''});view.innerHTML=`<div class="panel"><div class="panel-head"><h3>كشف حساب العميل</h3></div><div class="toolbar lookup-toolbar"><input class="search-input" id="stSearch" placeholder="بحث بالاسم / الجوال"><select id="stSelect" class="wide-select">${selectOptions(rows,'CUSTOMER_ID',r=>`${esc(r.NAME)} — ${esc(r.PHONE||r.CUSTOMER_ID)}`,'اختر العميل')}</select><button class="btn btn-teal" id="stShow">عرض</button></div></div><div id="stResult"></div>`;stSearch.oninput=async e=>{const list=await api('searchCustomers',{q:e.target.value});stSelect.innerHTML=selectOptions(list,'CUSTOMER_ID',r=>`${esc(r.NAME)} — ${esc(r.PHONE||r.CUSTOMER_ID)}`,'اختر العميل')};stShow.onclick=()=>{if(!stSelect.value)return toast('اختر العميل ثم اضغط عرض.','error');loadStatementCustomer(stSelect.value)}};
+async function loadStatementCustomer(customerId){const sel=document.getElementById('stSelect');if(sel)sel.value=customerId;const [st,c]=await Promise.all([api('getCustomerStatement',{customerId}),api('getCustomerForView',{customerId})]);document.getElementById('stResult').innerHTML=`<div class="page-intro"><div><h3>${esc(c.NAME)}</h3><p>${esc(c.PHONE||'')} — ${esc(c.CITY||'')}</p></div><button class="btn" id="btnStPdf">تصدير PDF</button></div><div class="stat-grid"><div class="stat-card"><div class="label">إجمالي الفواتير</div><div class="value num">${money(st.totals.totalInvoices)}</div></div><div class="stat-card good"><div class="label">إجمالي المحصل</div><div class="value num">${money(st.totals.totalPaid)}</div></div><div class="stat-card"><div class="label">الخصومات</div><div class="value num">${money(st.totals.totalDiscounts)}</div></div><div class="stat-card warn"><div class="label">الرصيد</div><div class="value num">${money(st.totals.outstanding)}</div></div></div><div class="panel"><div class="panel-head"><h3>حركة الحساب</h3></div>${renderTable([{label:'التاريخ',render:x=>prettyDate(x.date)},{label:'النوع',key:'typeLabel'},{label:'المرجع',key:'refNo'},{label:'البيان',key:'description'},{label:'مدين',render:x=>x.debit?`<span class="num">${money(x.debit)}</span>`:''},{label:'دائن',render:x=>x.credit?`<span class="num">${money(x.credit)}</span>`:''},{label:'الرصيد',render:x=>`<span class="num">${money(x.balance)}</span>`}],st.rows,'لا توجد حركات.')}</div>`;btnStPdf.onclick=async()=>{const pdf=await api('createCustomerStatementPdf',{customerId});window.open(pdf.url,'_blank')}}
 
 /* ---------- التقارير ---------- */
-VIEWS.reports = async function (view) {
-  view.innerHTML = `
-    <div class="panel">
-      <div class="toolbar">
-        <div class="form-field" style="margin:0"><label>من</label><input type="date" id="rpFrom" value="${monthStartStr()}"></div>
-        <div class="form-field" style="margin:0"><label>إلى</label><input type="date" id="rpTo" value="${todayStr()}"></div>
-        <button class="btn btn-primary" id="rpGo" style="align-self:flex-end">عرض التقرير</button>
-      </div>
-    </div>
-    <div id="rpResult"></div>`;
-  const run = async () => {
-    const fromDate = document.getElementById('rpFrom').value, toDate = document.getElementById('rpTo').value;
-    const [period, byCat] = await Promise.all([
-      api('reportDataForPeriod', { fromDate, toDate }), api('salesByCategoryReport', { fromDate, toDate })
-    ]);
-    document.getElementById('rpResult').innerHTML = `
-      <div class="stat-grid">
-        <div class="stat-card"><div class="label">عدد الفواتير بالفترة</div><div class="value num">${period.invoiceCount}</div></div>
-        <div class="stat-card accent"><div class="label">إجمالي المبيعات</div><div class="value num">${money(period.invoiceTotal)}</div></div>
-        <div class="stat-card good"><div class="label">إجمالي التحصيل</div><div class="value num">${money(period.totalCollection)}</div></div>
-        <div class="stat-card warn"><div class="label">المتبقي على فواتير الفترة</div><div class="value num">${money(period.remaining)}</div></div>
-        <div class="stat-card"><div class="label">دفعات مقدمة ضمن الفواتير</div><div class="value num">${money(period.invoiceEmbeddedCollection)}</div></div>
-        <div class="stat-card"><div class="label">تحصيل بسندات قبض</div><div class="value num">${money(period.ordinaryReceiptCollection)}</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h3>المبيعات حسب الفئة</h3></div>
-        ${renderTable([
-          { label: 'الفئة', key: 'category' }, { label: 'عدد الفواتير', key: 'count' },
-          { label: 'المبيعات', render: r => `<span class="num">${money(r.sales)}</span>` },
-          { label: 'التكلفة', render: r => `<span class="num">${money(r.cost)}</span>` },
-          { label: 'هامش الربح التقديري', render: r => `<span class="num">${money(r.profit)}</span>` }
-        ], byCat, 'لا توجد مبيعات ضمن هذه الفترة.')}
-      </div>`;
-  };
-  document.getElementById('rpGo').onclick = run;
-  await run();
-};
+VIEWS.reports=async function(view){view.innerHTML=`<div class="panel"><div class="panel-head"><h3>مركز التقارير</h3><span class="muted">تقرير موحد بدل الصفحات المتفرقة</span></div><div class="toolbar"><div class="form-field compact"><label>من</label><input type="date" id="rpFrom" value="${monthStartStr()}"></div><div class="form-field compact"><label>إلى</label><input type="date" id="rpTo" value="${todayStr()}"></div><button class="btn btn-primary" id="rpGo">تحديث التقرير</button></div></div><div id="rpResult"></div>`;rpGo.onclick=runWebReport;await runWebReport()}
+async function runWebReport(){const box=document.getElementById('rpResult');box.innerHTML='<div class="panel"><div class="panel-body">جارٍ تحليل البيانات...</div></div>';try{const d=await api('getWebReportData',{fromDate:rpFrom.value,toDate:rpTo.value});box.innerHTML=`<div class="page-intro"><div><h3>الفترة: ${prettyDate(d.fromDate)} — ${prettyDate(d.toDate)}</h3><p>الحسابات تعتمد على المستندات السارية مع خصم الاستردادات وعكس السندات.</p></div></div><div class="stat-grid"><div class="stat-card"><div class="label">عدد الفواتير</div><div class="value num">${d.invoiceCount}</div></div><div class="stat-card accent"><div class="label">المبيعات</div><div class="value num">${money(d.sales)}</div></div><div class="stat-card good"><div class="label">سندات القبض</div><div class="value num">${money(d.receipts)}</div></div><div class="stat-card"><div class="label">الاستردادات</div><div class="value num">${money(d.refunds)}</div></div><div class="stat-card good"><div class="label">صافي التحصيل</div><div class="value num">${money(d.netCollection)}</div></div><div class="stat-card warn"><div class="label">الرصيد الحالي لفواتير الفترة</div><div class="value num">${money(d.currentOutstanding)}</div></div><div class="stat-card"><div class="label">الأقساط المتأخرة</div><div class="value num">${d.overdueCount}</div></div><div class="stat-card"><div class="label">المستحقة قريبًا</div><div class="value num">${d.dueSoonCount}</div></div></div>
+ <div class="two-col"><div class="panel"><div class="panel-head"><h3>التحصيل حسب طريقة الدفع</h3></div>${renderTable([{label:'الطريقة',key:'method'},{label:'القبض',render:r=>`<span class="num">${money(r.receipts)}</span>`},{label:'الاسترداد',render:r=>`<span class="num">${money(r.refunds)}</span>`},{label:'الصافي',render:r=>`<span class="num">${money(r.net)}</span>`}],d.byMethod,'لا توجد حركات.')}</div><div class="panel"><div class="panel-head"><h3>المبيعات حسب الفئة</h3></div>${renderTable([{label:'الفئة',key:'category'},{label:'العدد',key:'count'},{label:'المبيعات',render:r=>`<span class="num">${money(r.sales)}</span>`}],d.byCategory,'لا توجد مبيعات.')}</div></div>
+ <div class="panel"><div class="panel-head"><h3>الفواتير ضمن الفترة</h3></div>${renderTable([{label:'الفاتورة',key:'INVOICE_NO'},{label:'التاريخ',render:r=>prettyDate(r.DATE)},{label:'العميل',key:'CUSTOMER_NAME'},{label:'الصنف',key:'ITEM_DESC'},{label:'الإجمالي',render:r=>`<span class="num">${money(r.TOTAL)}</span>`},{label:'المحصل الصافي',render:r=>`<span class="num">${money(r.NET_COLLECTED)}</span>`},{label:'المتبقي',render:r=>`<span class="num">${money(r.BALANCE)}</span>`}],d.invoices,'لا توجد فواتير في الفترة.')}</div>
+ <div class="panel"><div class="panel-head"><h3>السندات ضمن الفترة</h3></div>${renderTable([{label:'السند',key:'RECEIPT_NO'},{label:'التاريخ',render:r=>prettyDate(r.DATE)},{label:'العميل',key:'CUSTOMER_NAME'},{label:'الفاتورة',key:'INVOICE_NO'},{label:'المبلغ',render:r=>`<span class="num">${money(r.AMOUNT)}</span>`},{label:'الطريقة',key:'PAYMENT_METHOD'}],d.receiptRows,'لا توجد سندات في الفترة.')}</div>
+ <div class="panel"><div class="panel-head"><h3>الأقساط المتأخرة والمستحقة قريبًا</h3></div>${renderTable([{label:'الحالة',key:'DUE_LABEL'},{label:'الفاتورة',key:'INVOICE_NO'},{label:'العميل',key:'CUSTOMER_NAME'},{label:'الصنف',key:'ITEM_DESC'},{label:'الاستحقاق',render:r=>prettyDate(r.DUE_DATE)},{label:'المتبقي',render:r=>`<span class="num">${money(r.BALANCE)}</span>`}],d.installments,'لا توجد أقساط مطلوبة.')}</div>`}catch(err){box.innerHTML=`<div class="alert danger">${esc(err.message)}</div>`}}
 
 /* ---------- الإعدادات ---------- */
 VIEWS.settings = async function (view) {
