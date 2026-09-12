@@ -3,118 +3,108 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#0b3d63">
-<title>المنار التجارية — نظام البيع بالتقسيط V3</title>
+<title>دفتر — نظام البيع بالتقسيط</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- شاشة ربط الخادم -->
-<div id="connectScreen" class="auth-screen hidden">
-  <div class="auth-shell">
-    <div class="auth-visual">
-      <span class="auth-version">V3</span>
-      <div class="auth-logo">م</div>
-      <h1>المنار التجارية</h1>
-      <p>إدارة أسرع للمبيعات بالأقساط، التحصيل والعملاء من مكان واحد.</p>
-      <div class="auth-points"><span>✓ بياناتك في Google Sheets</span><span>✓ صلاحيات وتسجيل دخول</span><span>✓ واجهة سريعة وخفيفة</span></div>
-    </div>
-    <div class="auth-card">
-      <div class="auth-card-head"><h2>ربط النظام</h2><p>أدخل رابط Google Apps Script Web App مرة واحدة فقط.</p></div>
-      <label>رابط الخادم</label>
-      <input id="apiUrlInput" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/XXXX/exec">
-      <button class="btn btn-primary btn-block" id="btnSaveApiUrl">حفظ ومتابعة</button>
-      <p class="auth-error" id="connectError"></p>
-    </div>
-  </div>
-</div>
-
-<!-- إعداد أول مدير -->
+<!-- شاشة تهيئة أول مدير للنظام -->
 <div id="setupScreen" class="auth-screen hidden">
-  <div class="auth-shell compact-auth">
-    <div class="auth-visual">
-      <span class="auth-version">V3</span><div class="auth-logo">م</div><h1>المنار التجارية</h1>
-      <p>تهيئة أول حساب مدير للنظام.</p>
+  <div class="auth-card">
+    <div class="brand">
+      <span class="brand-mark">📒</span>
+      <div>
+        <h1>دفتر</h1>
+        <p>إعداد النظام لأول مرة</p>
+      </div>
     </div>
-    <div class="auth-card">
-      <div class="auth-card-head"><h2>إنشاء مدير النظام</h2><p>هذا الحساب يملك الإعدادات وإدارة أعضاء الفريق.</p></div>
-      <label>الاسم</label><input id="setupName" type="text" autocomplete="name" placeholder="الاسم الكامل">
-      <label>البريد الإلكتروني</label><input id="setupEmail" type="email" autocomplete="email" placeholder="admin@example.com">
-      <label>كلمة المرور</label><input id="setupPassword" type="password" autocomplete="new-password" placeholder="6 خانات على الأقل">
-      <button class="btn btn-primary btn-block" id="btnCreateAdmin">إنشاء حساب المدير والدخول</button>
-      <p class="auth-error" id="setupError"></p>
-      <button class="btn-link" id="btnChangeApiFromSetup">تغيير رابط الخادم</button>
-    </div>
+    <p class="auth-hint">لا يوجد أي مستخدم بعد. أنشئ حساب المدير الرئيسي للنظام.</p>
+    <label>الاسم</label>
+    <input id="setupName" type="text" placeholder="اسمك الكامل">
+    <label>البريد الإلكتروني</label>
+    <input id="setupEmail" type="email" placeholder="admin@example.com">
+    <label>كلمة المرور (٦ خانات على الأقل)</label>
+    <input id="setupPassword" type="password" placeholder="••••••••">
+    <button class="btn btn-primary btn-block" id="btnCreateAdmin">إنشاء حساب المدير والدخول</button>
+    <p class="auth-error" id="setupError"></p>
   </div>
 </div>
 
-<!-- تسجيل الدخول -->
+<!-- شاشة تسجيل الدخول -->
 <div id="loginScreen" class="auth-screen hidden">
-  <div class="auth-shell compact-auth">
-    <div class="auth-visual">
-      <span class="auth-version">V3</span><div class="auth-logo">م</div><h1>المنار التجارية</h1>
-      <p>مرحبًا بعودتك. سجّل الدخول للمتابعة.</p>
+  <div class="auth-card">
+    <div class="brand">
+      <span class="brand-mark">📒</span>
+      <div>
+        <h1>دفتر</h1>
+        <p>نظام البيع بالتقسيط</p>
+      </div>
     </div>
-    <div class="auth-card">
-      <div class="auth-card-head"><h2>تسجيل الدخول</h2><p>استخدم الحساب الذي أنشأه مدير النظام.</p></div>
-      <label>البريد الإلكتروني</label><input id="loginEmail" type="email" autocomplete="username" placeholder="name@example.com">
-      <label>كلمة المرور</label><input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••">
-      <button class="btn btn-primary btn-block" id="btnLogin">دخول</button>
-      <p class="auth-error" id="loginError"></p>
-      <button class="btn-link" id="btnChangeApiFromLogin">تغيير رابط الخادم</button>
-    </div>
+    <label>البريد الإلكتروني</label>
+    <input id="loginEmail" type="email" placeholder="name@example.com">
+    <label>كلمة المرور</label>
+    <input id="loginPassword" type="password" placeholder="••••••••">
+    <button class="btn btn-primary btn-block" id="btnLogin">دخول</button>
+    <p class="auth-error" id="loginError"></p>
   </div>
 </div>
 
-<!-- التطبيق -->
+<!-- هيكل التطبيق الرئيسي -->
 <div id="appShell" class="app-shell hidden">
-  <aside class="sidebar" id="sidebar">
+  <aside class="sidebar">
     <div class="sidebar-brand">
-      <div class="brand-symbol">م</div>
-      <div class="brand-copy"><strong id="brandCompanyName">المنار التجارية</strong><small>نظام البيع بالتقسيط</small></div>
-      <span class="version-chip">V3</span>
+      <span class="brand-mark">📒</span>
+      <div>
+        <strong>دفتر</strong>
+        <small>البيع بالتقسيط</small>
+      </div>
     </div>
     <nav id="sideNav" class="side-nav"></nav>
-    <div class="sidebar-admin-note" id="adminOnlyHint">إدارة أعضاء الفريق والإعدادات متاحة لمدير النظام فقط.</div>
     <div class="sidebar-footer">
       <div class="user-chip">
-        <span id="userInitial" class="user-avatar">—</span>
-        <div class="user-copy"><strong id="userName">—</strong><small id="userRole">—</small></div>
+        <span id="userInitial" class="user-avatar"></span>
+        <div>
+          <strong id="userName">—</strong>
+          <small id="userRole">—</small>
+        </div>
       </div>
-      <button class="btn-link danger" id="btnLogout">تسجيل الخروج</button>
+      <button class="btn-link danger" id="btnLogout">خروج</button>
     </div>
   </aside>
 
   <div class="main-col">
     <header class="topbar">
-      <button id="sidebarToggle" class="mobile-menu" type="button" aria-label="القائمة">☰</button>
-      <div class="top-title"><h2 id="pageTitle">لوحة التحكم</h2><span id="pageSubTitle">نظرة سريعة على أعمالك</span></div>
-      <div class="global-search-wrap">
-        <span class="search-icon">⌕</span>
-        <input id="globalSearch" class="global-search" autocomplete="off" placeholder="ابحث عن عميل أو فاتورة...">
-        <span class="kbd">Ctrl K</span>
-        <div id="globalSearchResults" class="global-search-results hidden"></div>
+      <h2 id="pageTitle">لوحة التحكم</h2>
+      <div class="topbar-search">
+        <input id="globalSearch" class="search-input" placeholder="بحث عن عميل، فاتورة، أو أي بيانات...">
       </div>
-      <div id="topbarActions" class="topbar-actions"></div>
-      <div class="top-user-mini"><span id="topUserInitial" class="top-avatar">—</span><div><b id="topUserName">—</b><small id="topUserRole">—</small></div></div>
+      <div class="topbar-actions">
+        <button class="icon-btn bell" id="btnBell" title="التنبيهات">
+          <span id="bellIconSlot"></span>
+          <span class="dot hidden" id="bellDot">0</span>
+        </button>
+        <div id="topbarActions" class="topbar-actions"></div>
+      </div>
     </header>
     <main id="view" class="view"></main>
   </div>
-  <div id="mobileSidebarBackdrop" class="mobile-sidebar-backdrop hidden"></div>
 </div>
 
-<!-- Drawer -->
+<!-- طبقة النافذة الجانبية (نموذج الإضافة/التعديل) -->
 <div id="drawerOverlay" class="drawer-overlay hidden">
   <div class="drawer">
-    <div class="drawer-head"><div><span class="drawer-kicker">المنار التجارية</span><h3 id="drawerTitle">—</h3></div><button class="icon-btn" id="drawerClose">✕</button></div>
+    <div class="drawer-head">
+      <h3 id="drawerTitle">—</h3>
+      <button class="icon-btn" id="drawerClose">✕</button>
+    </div>
     <div id="drawerBody" class="drawer-body"></div>
   </div>
 </div>
 
 <div id="toast" class="toast hidden"></div>
-<script src="app.js" defer></script>
+
+<script src="app.js"></script>
 </body>
 </html>
